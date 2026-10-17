@@ -298,6 +298,13 @@ def validate_record(
                 sentence_id,
                 "author_inference has no literature/theory evidence; confirm the claim ceiling",
             )
+    elif claim_type == "objective" and not evidence:
+        add_issue(
+            warnings,
+            line_no,
+            sentence_id,
+            "objective has no evidence record; link it to the approved blueprint or gap",
+        )
     elif claim_type == "transition" and evidence and "rhetorical" not in evidence_types:
         add_issue(
             warnings,

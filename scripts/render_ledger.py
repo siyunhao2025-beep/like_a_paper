@@ -151,9 +151,11 @@ def render_review(records: list[dict[str, Any]]) -> str:
         "",
     ]
 
-    sentence_number = 0
     for section, paragraphs in grouped.items():
         lines.extend([f"## {section}", ""])
+        # Number sentences within each review unit so "第 N 句" matches the
+        # per-section approval interaction instead of drifting across sections.
+        sentence_number = 0
         for paragraph_records in paragraphs.values():
             for record in paragraph_records:
                 sentence_number += 1
@@ -291,7 +293,9 @@ def main() -> int:
     if args.output:
         output_path = Path(args.output).expanduser().resolve()
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(output, encoding="utf-8", newline="\n")
+        # Path.write_text gained a newline argument only in Python 3.10.
+        with output_path.open("w", encoding="utf-8", newline="\n") as handle:
+            handle.write(output)
         print(f"Rendered {len(records)} sentences in {args.view} view to {output_path}")
     else:
         sys.stdout.write(output)

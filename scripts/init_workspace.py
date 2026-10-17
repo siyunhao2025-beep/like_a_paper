@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import shutil
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -246,7 +247,22 @@ def parse_args() -> argparse.Namespace:
 
 
 def write_text(path: Path, content: str) -> None:
-    path.write_text(content, encoding="utf-8", newline="\n")
+    # Path.write_text gained a newline argument only in Python 3.10.
+    with path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(content)
+
+
+def cleanup_partial_init(root: Path) -> None:
+    # Best effort: remove everything written during the failed initialization
+    # so the non-empty-directory guard does not block a retry.
+    for child in root.iterdir():
+        try:
+            if child.is_dir() and not child.is_symlink():
+                shutil.rmtree(child, ignore_errors=True)
+            else:
+                child.unlink()
+        except OSError:
+            pass
 
 
 def main() -> int:
@@ -261,46 +277,52 @@ def main() -> int:
         return 2
 
     root.mkdir(parents=True, exist_ok=True)
-    for relative in DIRECTORIES:
-        (root / relative).mkdir(parents=True, exist_ok=True)
+    try:
+        for relative in DIRECTORIES:
+            (root / relative).mkdir(parents=True, exist_ok=True)
 
-    created_at = datetime.now(timezone.utc).isoformat()
-    state = {
-        "skill": "like-a-paper",
-        "mode": args.mode,
-        "created_at": created_at,
-        "evidence_state": "open",
-        "corpus_adequacy_state": "not_assessed",
-        "contract_state": "not_started",
-        "blueprint_state": "not_started",
-        "section_states": {},
-        "manuscript_state": "not_started",
-        "last_user_approval": None,
-    }
-    write_text(root / "project.json", json.dumps(state, indent=2, ensure_ascii=False) + "\n")
-    write_text(root / "00_intake" / "intake-checklist.md", INTAKE_TEMPLATE)
-    write_text(root / "00_intake" / "evidence-register.md", "# Evidence register\n\n")
-    write_text(root / "00_intake" / "unresolved-items.md", "# Unresolved items\n\n")
-    write_text(root / "02_distillation" / "distillation-report.md", "# Corpus distillation report\n\n")
-    write_text(
-        root / "02_distillation" / "corpus-adequacy.json",
-        json.dumps(adequacy_template(args.mode), indent=2, ensure_ascii=False) + "\n",
-    )
-    write_text(
-        root / "02_distillation" / "corpus-adequacy-report.md",
-        "# Corpus adequacy report\n\nVerdict: not assessed\n",
-    )
-    write_text(root / "03_contract" / "writing-contract.md", CONTRACT_TEMPLATE)
-    write_text(root / "03_contract" / "approval-record.md", APPROVAL_TEMPLATE)
-    write_text(root / "04_blueprint" / "paragraph-blueprint.md", BLUEPRINT_TEMPLATE)
-    write_text(root / "05_sentence_ledger" / "sentence_ledger.jsonl", "")
-    write_text(root / "06_manuscript" / "manuscript.md", "# Manuscript\n\n")
-    write_text(root / "07_audit" / "final-audit.md", AUDIT_TEMPLATE)
+        created_at = datetime.now(timezone.utc).isoformat()
+        state = {
+            "skill": "like-a-paper",
+            "mode": args.mode,
+            "created_at": created_at,
+            "evidence_state": "open",
+            "corpus_adequacy_state": "not_assessed",
+            "contract_state": "not_started",
+            "blueprint_state": "not_started",
+            "section_states": {},
+            "manuscript_state": "not_started",
+            "last_user_approval": None,
+        }
+        write_text(root / "project.json", json.dumps(state, indent=2, ensure_ascii=False) + "\n")
+        write_text(root / "00_intake" / "intake-checklist.md", INTAKE_TEMPLATE)
+        write_text(root / "00_intake" / "evidence-register.md", "# Evidence register\n\n")
+        write_text(root / "00_intake" / "unresolved-items.md", "# Unresolved items\n\n")
+        write_text(root / "02_distillation" / "distillation-report.md", "# Corpus distillation report\n\n")
+        write_text(
+            root / "02_distillation" / "corpus-adequacy.json",
+            json.dumps(adequacy_template(args.mode), indent=2, ensure_ascii=False) + "\n",
+        )
+        write_text(
+            root / "02_distillation" / "corpus-adequacy-report.md",
+            "# Corpus adequacy report\n\nVerdict: not assessed\n",
+        )
+        write_text(root / "03_contract" / "writing-contract.md", CONTRACT_TEMPLATE)
+        write_text(root / "03_contract" / "approval-record.md", APPROVAL_TEMPLATE)
+        write_text(root / "04_blueprint" / "paragraph-blueprint.md", BLUEPRINT_TEMPLATE)
+        write_text(root / "05_sentence_ledger" / "sentence_ledger.jsonl", "")
+        write_text(root / "06_manuscript" / "manuscript.md", "# Manuscript\n\n")
+        write_text(root / "07_audit" / "final-audit.md", AUDIT_TEMPLATE)
 
-    corpus_path = root / "01_corpus" / "corpus-register.csv"
-    with corpus_path.open("w", encoding="utf-8-sig", newline="") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(CORPUS_COLUMNS)
+        corpus_path = root / "01_corpus" / "corpus-register.csv"
+        with corpus_path.open("w", encoding="utf-8-sig", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(CORPUS_COLUMNS)
+    except BaseException:
+        # A failed initialization must not leave a half-built workspace
+        # behind the non-empty-directory guard.
+        cleanup_partial_init(root)
+        raise
 
     print(f"Initialized like-a-paper workspace: {root}")
     print(f"Mode: {args.mode}")
